@@ -5,7 +5,8 @@ import click
 
 from linkml._version import __version__
 from linkml.generators.pythongen import PythonGenerator
-from linkml.utils.generator import deprecated_fields, shared_arguments
+from linkml.utils.deprecation import deprecated_fields
+from linkml.utils.generator import shared_arguments
 from linkml_runtime.utils.formatutils import be, split_line
 
 

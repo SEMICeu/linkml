@@ -16,7 +16,8 @@ import linkml
 from linkml._version import __version__
 from linkml.generators.pydanticgen.template import Import, Imports, ObjectImport
 from linkml.generators.python.python_ifabsent_processor import PythonIfAbsentProcessor
-from linkml.utils.generator import Generator, deprecated_fields, shared_arguments
+from linkml.utils.deprecation import deprecated_fields, deprecation_warning
+from linkml.utils.generator import Generator, shared_arguments
 from linkml_runtime import SchemaView
 from linkml_runtime.linkml_model import linkml_files
 from linkml_runtime.linkml_model.meta import (

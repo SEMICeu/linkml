@@ -11,7 +11,8 @@ from typing import Optional
 import click
 
 from linkml._version import __version__
-from linkml.utils.generator import Generator, deprecated_fields, shared_arguments
+from linkml.utils.deprecation import deprecated_fields
+from linkml.utils.generator import Generator, shared_arguments
 from linkml_runtime.linkml_model.meta import ClassDefinition, ClassDefinitionName
 from linkml_runtime.utils.formatutils import be, underscore
 
