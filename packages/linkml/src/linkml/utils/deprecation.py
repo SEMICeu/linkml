@@ -285,7 +285,7 @@ DEPRECATIONS = (
             "on some generators is no longer supported. "
             "Flags `head`, `emit_metadata` and `metadata` were being used for "
             "the same purpose. "
-            "They have been unified, remaining only `metadata`."
+            "They have been unified, leaving only the flag `metadata`."
         ),
         recommendation="Use flag `metadata` instead",
         issue=1799,
