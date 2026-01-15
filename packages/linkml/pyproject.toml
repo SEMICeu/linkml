@@ -137,6 +137,9 @@ linkml-runtime = { workspace = true }
 
 [project.scripts]
 linkml = "linkml.cli.main:linkml"
+
+gen-owl-semic = "linkml.generators.semic.owlgen_semic:cli"
+
 gen-jsonld-context = "linkml.generators.jsonldcontextgen:cli"
 gen-prefix-map = "linkml.generators.prefixmapgen:cli"
 gen-csv = "linkml.generators.csvgen:cli"
