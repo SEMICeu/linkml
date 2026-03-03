@@ -139,6 +139,7 @@ linkml-runtime = { workspace = true }
 linkml = "linkml.cli.main:linkml"
 
 gen-owl-semic = "linkml.generators.semic.owlgen_semic:cli"
+gen-jsonld-context-semic = "linkml.generators.semic.jsonldcontextgen_semic:cli"
 
 gen-jsonld-context = "linkml.generators.jsonldcontextgen:cli"
 gen-prefix-map = "linkml.generators.prefixmapgen:cli"

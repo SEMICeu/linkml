@@ -34,7 +34,11 @@ class ContextGenerator(Generator):
     generatorname = os.path.basename(__file__)
     generatorversion = "0.1.1"
     valid_formats = ["context", "json"]
-    visit_all_class_slots = False
+
+    #  
+    visit_all_class_slots = True
+    nested_class_context: bool = False
+
     uses_schemaloader = True
     requires_metamodel = True
     file_extension = "context.jsonld"
@@ -49,6 +53,9 @@ class ContextGenerator(Generator):
     base: Optional[Union[str, Namespace]] = None
     output: Optional[str] = None
     prefixes: Optional[bool] = True
+    #TODO name collision
+    current_class: Optional[str] = None
+
     flatprefixes: Optional[bool] = False
     fix_multivalue_containers: Optional[bool] = False
 
@@ -172,7 +179,11 @@ class ContextGenerator(Generator):
 
         self._build_element_id(class_def, cls.class_uri)
         if class_def:
-            self.slot_class_maps[cn] = class_def
+            if self.nested_class_context:
+                # Put class in context_body so visit_class_slot can add @context with properties
+                self.context_body[cn] = dict(class_def)
+            else:
+                self.slot_class_maps[cn] = class_def
 
         # prefer explicit tree_root for frame @type
         if getattr(cls, "tree_root", False):
@@ -217,11 +228,83 @@ class ContextGenerator(Generator):
                 self.add_mappings(slot)
         if slot_def:
             key = underscore(aliased_slot_name)
-            self.context_body[key] = slot_def
+            # When nested, properties are emitted only under classes in visit_class_slot
+            if not self.nested_class_context:
+                self.context_body[key] = slot_def
 
             # collect @embed only for object-valued slots (range is a class)
             if slot.range in self.schema.classes and slot.inlined is not None:
                 self.frame_body[key] = {"@embed": "@always" if bool(slot.inlined) else "@never"}
+
+    def visit_class_slot(self, cls: ClassDefinition, aliased_slot_name: str, slot: SlotDefinition) -> None:
+        """Visit slots in the context of their containing class"""
+        # For slot_usage-induced slots, the slot is merged with the base slot and has range/slot_uri etc.
+        # Use the base slot for URI/type when we only have a usage override (usage_slot_name set).
+        effective_slot = (
+            self.schema.slots[slot.usage_slot_name]
+            if slot.usage_slot_name and slot.usage_slot_name in self.schema.slots
+            else slot
+        )
+        if slot.identifier:
+            slot_def = "@id"
+        else:
+            slot_def = {}
+            # Build from effective_slot so that usage slots (e.g. Person's gender1) get the same def as the base
+            if effective_slot.range or effective_slot.any_of:
+                any_of_ranges = [any_of_el.range for any_of_el in effective_slot.any_of]
+                if effective_slot.range in self.schema.classes or any(
+                    rng in self.schema.classes for rng in any_of_ranges
+                ):
+                    slot_def["@type"] = "@id"
+                elif effective_slot.range in self.schema.enums:
+                    slot_def["@context"] = ENUM_CONTEXT
+                    skos = self.namespaces.prefix_for(SKOS)
+                    if not skos:
+                        self.namespaces["skos"] = SKOS
+                        skos = "skos"
+                    self.emit_prefixes.add(skos)
+                else:
+                    range_type = self.schema.types.get(effective_slot.range)
+                    if range_type:
+                        if self.namespaces.uri_for(range_type.uri) == XSD.string:
+                            pass
+                        elif self.namespaces.uri_for(range_type.uri) in URI_RANGES:
+                            slot_def["@type"] = "@id"
+                        else:
+                            slot_def["@type"] = range_type.uri
+
+                # Add @container for multivalued slots (use current slot for overrides like multivalued)
+                if slot.multivalued:
+                    if slot.inlined and not slot.inlined_as_list:
+                        slot_def["@container"] = "@index"
+                    else:
+                        slot_def["@container"] = "@set"
+
+                self._build_element_id(slot_def, effective_slot.slot_uri or slot.slot_uri)
+                self.add_mappings(effective_slot)
+            elif effective_slot.slot_uri:
+                self._build_element_id(slot_def, effective_slot.slot_uri)
+                self.add_mappings(effective_slot)
+        if slot_def:
+            class_name = camelcase(cls.name)
+            slot_name = underscore(aliased_slot_name)
+
+            if self.nested_class_context:
+                # Nested format: Class -> @id + @context with properties
+                if class_name not in self.context_body:
+                    self.context_body[class_name] = {}
+                if "@context" not in self.context_body[class_name]:
+                    self.context_body[class_name]["@context"] = {}
+                self.context_body[class_name]["@context"][slot_name] = slot_def
+            else:
+                # Flat format: Class.property
+                key = f"{class_name}.{slot_name}"
+                self.context_body[key] = slot_def
+
+            # collect @embed for frame
+            if slot.range in self.schema.classes and slot.inlined is not None:
+                frame_key = f"{class_name}.{slot_name}" if not self.nested_class_context else slot_name
+                self.frame_body[frame_key] = {"@embed": "@always" if bool(slot.inlined) else "@never"}
 
     def _build_element_id(self, definition: Any, uri: str) -> None:
         """
@@ -256,6 +339,13 @@ class ContextGenerator(Generator):
 @shared_arguments(ContextGenerator)
 @click.command(name="jsonld-context")
 @click.option("--base", help="Base URI for model")
+
+@click.option(
+    "--nested-class-context/--flat-class-context",
+    default=False,
+    show_default=True,
+    help="Use nested @context per class vs flat Class.property keys",
+)
 @click.option(
     "--prefixes/--no-prefixes",
     default=True,
@@ -299,11 +389,11 @@ class ContextGenerator(Generator):
     help="For multivalued attributes declare a fix container type ('@set' for lists, '@index' for dictionaries).",
 )
 @click.version_option(__version__, "-V", "--version")
-def cli(yamlfile, emit_frame, embed_context_in_frame, output, **args):
+def cli(yamlfile, emit_frame, embed_context_in_frame, output, nested_class_context, **args):
     """Generate jsonld @context definition from LinkML model"""
     if (emit_frame or embed_context_in_frame) and not output:
         raise click.UsageError("--emit-frame/--embed-context-in-frame requires --output")
-    gen = ContextGenerator(yamlfile, **args)
+    gen = ContextGenerator(yamlfile, nested_class_context=nested_class_context, **args)
     if embed_context_in_frame:
         gen.emit_frame = True
         gen.embed_context_in_frame = True

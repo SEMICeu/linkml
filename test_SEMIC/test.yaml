@@ -1,0 +1,64 @@
+id: AB
+name: core-person-voc
+title: core-person-voc
+license: https://creativecommons.org/licenses/by/4.0/
+prefixes:
+  linkml: https://w3id.org/linkml/
+  schema: http://schema.org/
+  foaf: http://xmlns.com/foaf/0.1/
+  vcard: http://www.w3.org/2006/vcard/ns#
+  ex: https://example.org/
+default_prefix: ex
+default_range: string
+
+default_curi_maps:
+  - semweb_context
+
+imports:
+  - linkml:types
+
+classes:
+  Person:
+    class_uri: schema:Person
+    annotations: 
+      rdfs:isDefinedBy: http://data.europa.eu/m8g
+      rdfs:comment: Information (e.g. e-mail address, telephone number) of a person or department through which the user can get in touch with.
+      skos:scopeNote: The Core Public Organization Vocabulary defines properties for telephone number, e-mail address and opening hours although it is noteworthy that the class is based on schema.org's ContactPoint class that has additional properties that some implementations may find useful.
+      rdfs:domain: "http://data.europa.eu/m8g"
+    slots:
+      - gender1
+      - age_in_years
+      - hasContactPoint
+    slot_usage:
+      gender1:
+        required: true
+      
+        
+  ContactPoint:
+    class_uri: schema:ContactPoint
+    slots:
+      - gender2
+    slot_usage:
+      gender2:
+        multivalued: true
+
+slots:
+  gender1:
+    slot_uri: schema:gender
+    range: string
+    annotations:
+      rdfs:isDefinedby: http://data.europa.eu/m8g
+      rdfs:comment: The main contact information of the resource.
+    
+
+  gender2:
+    slot_uri: foaf:gender
+    range: string
+    
+  age_in_years:
+    range: integer
+    minimum_value: 0
+    maximum_value: 999
+
+  hasContactPoint:
+    range: ContactPoint
