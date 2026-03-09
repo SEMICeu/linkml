@@ -35,9 +35,8 @@ class ContextGenerator(Generator):
     generatorversion = "0.1.1"
     valid_formats = ["context", "json"]
 
-    #  
-    visit_all_class_slots = True
-    nested_class_context: bool = False
+    visit_all_class_slots = False
+    nested_class_context: Optional[bool] = None
 
     uses_schemaloader = True
     requires_metamodel = True
@@ -67,6 +66,11 @@ class ContextGenerator(Generator):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        # None  = no flag passed → plain flat output, no class slot visiting
+        # True  = --nested-class-context → hierarchical per-class @context
+        # False = --flat-class-context   → flat Class.property keys
+        if self.nested_class_context is not None:
+            self.visit_all_class_slots = True
         if self.namespaces is None:
             raise TypeError("Schema text must be supplied to context generator.  Preparsed schema will not work")
 
@@ -189,8 +193,8 @@ class ContextGenerator(Generator):
         if getattr(cls, "tree_root", False):
             self.frame_root = cls.name
 
-        # We don't bother to visit class slots - just all slots
-        return True
+        # Only walk class slots when --nested-class-context or --flat-class-context is passed
+        return self.nested_class_context is not None
 
     def visit_slot(self, aliased_slot_name: str, slot: SlotDefinition) -> None:
         if slot.identifier:
@@ -342,7 +346,7 @@ class ContextGenerator(Generator):
 
 @click.option(
     "--nested-class-context/--flat-class-context",
-    default=False,
+    default=None,
     show_default=True,
     help="Use nested @context per class vs flat Class.property keys",
 )
