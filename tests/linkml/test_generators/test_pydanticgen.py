@@ -807,7 +807,7 @@ classes:
 
 
 @pytest.mark.parametrize(
-    "value, required, minimium_cardinality, maximum_cardinality, exact_cardinality, valid",
+    "value, required, minimum_cardinality, maximum_cardinality, exact_cardinality, valid",
     (
         (
             None,
@@ -860,7 +860,7 @@ classes:
         ([1, 2, 3], True, 3, 3, 3, True),
     ),
 )
-def test_pydantic_cardinality(value, required, minimium_cardinality, maximum_cardinality, exact_cardinality, valid):
+def test_pydantic_cardinality(value, required, minimum_cardinality, maximum_cardinality, exact_cardinality, valid):
     """
     Ensure that the cardinality constraints for list length are correctly applied
     to the generated pydantic model, using SchemaBuilder.
@@ -874,7 +874,7 @@ def test_pydantic_cardinality(value, required, minimium_cardinality, maximum_car
                 range="float",
                 multivalued=True,
                 required=required,
-                minimum_cardinality=minimium_cardinality,
+                minimum_cardinality=minimum_cardinality,
                 maximum_cardinality=maximum_cardinality,
                 exact_cardinality=exact_cardinality,
             )
@@ -890,7 +890,7 @@ def test_pydantic_cardinality(value, required, minimium_cardinality, maximum_car
     field = cls.model_fields["cardinality_array"]
 
     assert field.is_required() == required
-    assert field.annotation == list[float] if required else Optional[list[float]]
+    assert field.annotation == list[float] if required else list[float] | None
 
     # filter down the metadata to only min_length and max_length entries
     min_length = [entry.min_length for entry in field.metadata if getattr(entry, "min_length", None) is not None]
@@ -901,9 +901,9 @@ def test_pydantic_cardinality(value, required, minimium_cardinality, maximum_car
         assert len(max_length) == 1
         assert exact_cardinality == min_length[0]
         assert exact_cardinality == max_length[0]
-    if minimium_cardinality:
+    if minimum_cardinality:
         assert len(min_length) == 1
-        assert minimium_cardinality == min_length[0]
+        assert minimum_cardinality == min_length[0]
     if maximum_cardinality:
         assert len(max_length) == 1
         assert maximum_cardinality == max_length[0]
@@ -1067,7 +1067,7 @@ def test_inject_classes(kitchen_sink_path, tmp_path, input_path, inject, expecte
         (
             'object_id: Optional[str] = Field(default=None, description="Unique UUID for each object")',
             "object_id",
-            Optional[str],
+            str | None,
             None,
             "Unique UUID for each object",
         ),
@@ -1554,7 +1554,7 @@ def test_template_render():
 
     class InnerTemplate(PydanticTemplateModel):
         template: ClassVar[str] = "inner.jinja"
-        value: Union[int, str] = 1
+        value: int | str = 1
 
     class TestTemplate(PydanticTemplateModel):
         template: ClassVar[str] = "test.jinja"
@@ -1639,7 +1639,7 @@ def test_arrays_anyshape_union():
     """
 
     class MyModel(BaseModel):
-        array: AnyShapeArray[Union[int, float]]
+        array: AnyShapeArray[int | float]
 
     arr = np.ones((2, 4, 5, 3, 2), dtype=int)
     _ = MyModel(array=arr.tolist())
@@ -1656,7 +1656,7 @@ def test_arrays_anyshape_union():
     (
         (None, [{}]),
         (int, [{"type": "integer"}]),
-        (Union[int, float], [{"type": "integer"}, {"type": "number"}]),
+        (int | float, [{"type": "integer"}, {"type": "number"}]),
     ),
 )
 def test_arrays_anyshape_json_schema(dtype, expected):
@@ -1669,7 +1669,7 @@ def test_arrays_anyshape_json_schema(dtype, expected):
 
         class MyModel(BaseModel):
             array: AnyShapeArray[dtype]
-            dummy: Optional[AnyShapeArray[str]] = None
+            dummy: AnyShapeArray[str] | None = None
 
     schema = MyModel.model_json_schema()
     array_ref = schema["properties"]["array"]["$ref"].split("/")[-1]
@@ -2861,24 +2861,282 @@ def test_union_of_with_slots_error():
         generator.serialize()
 
 
-def test_crappy_stdlib_set_removed():
-    """
-    After support for <3.10 is dropped, remove the dang stdlib list stub
+# --------------------------------------------------
+# Tests for subproperty_of constraint
+# --------------------------------------------------
 
-    since this is just a tidiness test rather than a correctness test,
-    wrap the whole thing in a try and self-contain its imports
-    """
-    try:
-        from importlib.metadata import metadata
 
-        from packaging.specifiers import SpecifierSet
-        from packaging.version import Version
+def test_subproperty_of_generates_literal():
+    """Test that subproperty_of generates Literal constraint with slot descendants."""
+    schema = """
+id: https://example.org/test
+name: test
 
-        linkml_meta = metadata("linkml")
-        req_python = SpecifierSet(linkml_meta.json["requires_python"])
-        assert req_python.contains(Version("3.9")), (
-            "REMOVE _some_stdlib_module_names from the bottom of pydanticgen/template.py, "
-        )
-        "and then REMOVE THIS TEST!"
-    except Exception:
-        pass
+prefixes:
+  ex: https://example.org/
+
+default_prefix: ex
+
+slots:
+  related_to:
+    description: Root predicate
+  causes:
+    is_a: related_to
+  treats:
+    is_a: related_to
+
+  predicate:
+    range: string
+    subproperty_of: related_to
+
+classes:
+  Association:
+    slots:
+      - predicate
+"""
+    gen = PydanticGenerator(schema)
+    code = gen.serialize()
+
+    # Should generate Literal with all descendants (sorted alphabetically)
+    assert 'Literal["causes", "related_to", "treats"]' in code
+
+
+def test_subproperty_of_with_deeper_hierarchy():
+    """Test that subproperty_of includes all descendants, not just direct children."""
+    schema = """
+id: https://example.org/test
+name: test
+
+prefixes:
+  ex: https://example.org/
+
+default_prefix: ex
+
+slots:
+  related_to:
+    description: Root predicate
+  causes:
+    is_a: related_to
+  directly_causes:
+    is_a: causes
+  treats:
+    is_a: related_to
+
+  predicate:
+    range: string
+    subproperty_of: related_to
+
+classes:
+  Association:
+    slots:
+      - predicate
+"""
+    gen = PydanticGenerator(schema)
+    code = gen.serialize()
+
+    # Should include grandchild (directly_causes)
+    assert 'Literal["causes", "directly_causes", "related_to", "treats"]' in code
+
+
+def test_subproperty_of_formats_as_curie_for_uriorcurie_range():
+    """Test that subproperty_of values are formatted as CURIEs for uriorcurie range."""
+    schema = """
+id: https://example.org/test
+name: test
+
+prefixes:
+  ex: https://example.org/
+
+default_prefix: ex
+
+slots:
+  related_to:
+    slot_uri: ex:related_to
+  causes:
+    is_a: related_to
+    slot_uri: ex:causes
+  treats:
+    is_a: related_to
+    slot_uri: ex:treats
+
+  predicate:
+    range: uriorcurie
+    subproperty_of: related_to
+
+classes:
+  Association:
+    slots:
+      - predicate
+"""
+    gen = PydanticGenerator(schema)
+    code = gen.serialize()
+
+    # Should format as CURIEs
+    assert 'Literal["ex:causes", "ex:related_to", "ex:treats"]' in code
+
+
+def test_subproperty_of_formats_as_uri_for_uri_range():
+    """Test that subproperty_of values are formatted as full URIs for uri range."""
+    schema = """
+id: https://example.org/test
+name: test
+
+prefixes:
+  ex: https://example.org/
+
+default_prefix: ex
+
+slots:
+  related_to:
+    slot_uri: ex:related_to
+  causes:
+    is_a: related_to
+    slot_uri: ex:causes
+
+  predicate:
+    range: uri
+    subproperty_of: related_to
+
+classes:
+  Association:
+    slots:
+      - predicate
+"""
+    gen = PydanticGenerator(schema)
+    code = gen.serialize()
+
+    # Should format as full URIs
+    assert "https://example.org/causes" in code
+    assert "https://example.org/related_to" in code
+
+
+def test_subproperty_of_can_be_disabled():
+    """Test that expand_subproperty_of=False disables the constraint expansion."""
+    schema = """
+id: https://example.org/test
+name: test
+
+prefixes:
+  linkml: https://w3id.org/linkml/
+  ex: https://example.org/
+
+imports:
+  - linkml:types
+
+default_prefix: ex
+
+slots:
+  related_to:
+    description: Root predicate
+  causes:
+    is_a: related_to
+
+  predicate:
+    range: string
+    subproperty_of: related_to
+
+classes:
+  Association:
+    slots:
+      - predicate
+"""
+    gen = PydanticGenerator(schema, expand_subproperty_of=False)
+    code = gen.serialize()
+
+    # Should NOT generate Literal with descendants
+    assert 'Literal["causes", "related_to"]' not in code
+    # Should use the regular range (string -> str)
+    assert "predicate: Optional[str]" in code
+
+
+def test_subproperty_of_validation():
+    """Test that generated Pydantic model validates predicate values."""
+    schema = """
+id: https://example.org/test
+name: test
+
+prefixes:
+  ex: https://example.org/
+
+default_prefix: ex
+
+slots:
+  related_to:
+    description: Root predicate
+  causes:
+    is_a: related_to
+  treats:
+    is_a: related_to
+
+  predicate:
+    range: string
+    subproperty_of: related_to
+
+classes:
+  Association:
+    slots:
+      - predicate
+"""
+    gen = PydanticGenerator(schema)
+    mod = gen.compile_module()
+
+    # Valid predicates should work
+    a1 = mod.Association(predicate="related_to")
+    assert a1.predicate == "related_to"
+
+    a2 = mod.Association(predicate="causes")
+    assert a2.predicate == "causes"
+
+    a3 = mod.Association(predicate="treats")
+    assert a3.predicate == "treats"
+
+    # Invalid predicate should fail
+    with pytest.raises(ValidationError):
+        mod.Association(predicate="invalid_predicate")
+
+
+def test_subproperty_of_with_slot_usage():
+    """Test subproperty_of in slot_usage narrows the constraint."""
+    schema = """
+id: https://example.org/test
+name: test
+
+prefixes:
+  ex: https://example.org/
+
+default_prefix: ex
+
+slots:
+  related_to:
+    description: Root predicate
+  interacts_with:
+    is_a: related_to
+  physically_interacts_with:
+    is_a: interacts_with
+  causes:
+    is_a: related_to
+
+  predicate:
+    range: string
+    subproperty_of: related_to
+
+classes:
+  Association:
+    slots:
+      - predicate
+  InteractionAssociation:
+    is_a: Association
+    slot_usage:
+      predicate:
+        subproperty_of: interacts_with
+
+"""
+    gen = PydanticGenerator(schema)
+    code = gen.serialize()
+
+    # Base Association should have all descendants
+    assert 'Literal["causes", "interacts_with", "physically_interacts_with", "related_to"]' in code
+
+    # InteractionAssociation should have narrowed constraint
+    # (interacts_with and its descendants only)
+    assert 'Literal["interacts_with", "physically_interacts_with"]' in code
